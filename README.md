@@ -1,6 +1,6 @@
-# AI-Driven Telecom Network Anomaly Detection (5G KPI Monitoring)
+# End-to-End ML Pipeline for 5G Network Anomaly Detection
 
-**Live demo: [to be added after deployment]**
+**Live demo: https://5g-anomaly-detection-e2e-pipeline-vmg4drna4c2aadbpzdizpv.streamlit.app/**
 
 ## Introduction & Goals
 
