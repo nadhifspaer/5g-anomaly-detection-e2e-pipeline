@@ -1,0 +1,19 @@
+# MLflow tracking store andd backup
+mlruns/
+mlruns_host_backup/
+mlruns_mlflow3_backup/
+
+# Virtual environment
+.venv/
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Database local scoring result
+streaming/scored_results.db
+*.db
+
+# Jupyter checkpoint
+.ipynb_checkpoints/

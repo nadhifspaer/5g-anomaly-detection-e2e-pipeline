@@ -1,0 +1,120 @@
+# Full local stack, architecture.md Section 4 Mode 2. Run `docker-compose up`
+# from this directory (or `docker-compose -f docker/docker-compose.yml up`
+# from the repo root). Prerequisite: an MLflow run must already exist under
+# mlruns/ (src/model.py's train_isolation_forest, e.g. via notebooks/02),
+# since api's lifespan loads the latest run at startup and mlruns/ is
+# bind-mounted read-only, never baked into the api image.
+
+services:
+  kafka:
+    # bitnami/kafka's versioned tags were pulled from Docker Hub (2025 registry
+    # restructuring, only bitnamilegacy/* or paid tags remain); official image instead
+    image: apache/kafka:3.7.0
+    environment:
+      - KAFKA_NODE_ID=0
+      - KAFKA_PROCESS_ROLES=controller,broker
+      - KAFKA_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      - KAFKA_CONTROLLER_QUORUM_VOTERS=0@kafka:9093
+      - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_INTER_BROKER_LISTENER_NAME=PLAINTEXT
+      # single-broker cluster: the internal __consumer_offsets topic defaults
+      # to replication factor 3 and silently fails to auto-create otherwise,
+      # which stalls every consumer group at FIND_COORDINATOR indefinitely
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+      - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
+      - KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1
+    ports:
+      - "9092:9092"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../mlruns:/app/mlruns:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  producer:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+    command: ["python", "streaming/producer.py", "--bootstrap-servers", "kafka:9092", "--rate", "20"]
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  consumer:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+    command:
+      [
+        "python", "streaming/consumer.py",
+        "--bootstrap-servers", "kafka:9092",
+        "--api-url", "http://api:8000/score",
+        "--db-path", "/data/scored_results.db",
+      ]
+    volumes:
+      - scored_data:/data
+    depends_on:
+      kafka:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+
+  dashboard:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.dashboard
+    environment:
+      - APP_MODE=local
+      - SCORED_DB_PATH=/data/scored_results.db
+    ports:
+      - "8501:8501"
+    volumes:
+      - scored_data:/data
+      - ../mlruns:/app/mlruns:ro
+    depends_on:
+      - consumer
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ../monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    volumes:
+      - ../monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+
+volumes:
+  scored_data:

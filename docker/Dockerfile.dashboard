@@ -1,0 +1,19 @@
+# Streamlit dashboard image, APP_MODE=cloud or local (docker-compose sets
+# local). See architecture.md Section 4, Section 9. Build context is the repo root.
+FROM python:3.11-slim
+
+WORKDIR /app
+ENV PYTHONPATH=/app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY src/ src/
+COPY dashboard/ dashboard/
+COPY data/ data/
+
+# mlruns/ bind-mounted read-only at runtime, only read in APP_MODE=cloud
+RUN mkdir -p mlruns
+
+EXPOSE 8501
+CMD ["streamlit", "run", "dashboard/app.py", "--server.address=0.0.0.0", "--server.port=8501"]

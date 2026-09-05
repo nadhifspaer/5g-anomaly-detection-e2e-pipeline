@@ -1,0 +1,12 @@
+# Scrapes api/main.py's /metrics endpoint (Stage 5.1: api_requests_total,
+# api_request_latency_seconds, api_request_errors_total). Local-only, per
+# architecture.md Section 4.
+
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: "fastapi"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["api:8000"]
