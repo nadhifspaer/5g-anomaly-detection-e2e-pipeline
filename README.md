@@ -1,6 +1,6 @@
 # End-to-End ML Pipeline for 5G Network Anomaly Detection
 
-**Live demo: https://5g-anomaly-detection-e2e-pipeline-vmg4drna4c2aadbpzdizpv.streamlit.app/**
+**Live demo: https://5g-anomaly-detection-e2e-pipeline-vmg4drna4c2aadbpzdizpv.streamlit.app/** (Usually takes about ~3 minutes to load)
 
 ## Introduction & Goals
 
