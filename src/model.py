@@ -1,6 +1,4 @@
-# Isolation Forest training + comparison-only baseline. See architecture.md
-# Section 3, Section 5 Step 3, Section 7. src/model.py owns these two
-# functions only; no routing logic, no scoring interface (src/score_pipeline.py).
+# Isolation Forest training + comparison-only baseline.
 
 import time
 from pathlib import Path
@@ -27,7 +25,7 @@ def derive_contamination_path_a(meta_train: pd.DataFrame) -> float:
 
 
 def _mlruns_uri() -> str:
-    # local file-based MLflow store under mlruns/, per architecture.md Section 6
+    # local file-based MLflow store under mlruns/
     return (Path(__file__).resolve().parent.parent / "mlruns").as_uri()
 
 
@@ -37,18 +35,7 @@ def train_isolation_forest(
     n_estimators: int = 200,
     random_state: int = 42,
 ) -> dict:
-    """Primary model: Isolation Forest on Stage 2's train-side feature matrix.
-
-    Evaluation Path A only (architecture.md Section 7/8, resolved at Stage
-    0.2, not re-litigated): contamination is the measured sla_compliant == 0
-    rate on meta_train, a single value, stated here as measured, not assumed.
-
-    Logs the run to the local MLflow store under mlruns/: contamination,
-    n_estimators, feature_set_version, training_seconds.
-
-    Returns {"path": "A", "runs": {contamination: {"model", "contamination",
-    "training_seconds"}}}.
-    """
+    """Trains the Isolation Forest and logs the run to MLflow; contamination derivation: see reports/model_evaluation.md, Contamination Rate."""
     contamination = derive_contamination_path_a(meta_train)
 
     mlflow.set_tracking_uri(_mlruns_uri())
@@ -81,6 +68,6 @@ def train_isolation_forest(
 def rolling_zscore_threshold_baseline(
     X: pd.DataFrame, threshold: float = BASELINE_ZSCORE_THRESHOLD
 ) -> pd.Series:
-    # comparison baseline only, never wired into serving (architecture.md Section 2)
+    # comparison baseline only, never wired into serving
     max_abs_z = X[fe.ZSCORE_COLS].abs().max(axis=1)
     return (max_abs_z > threshold).astype(int).rename("baseline_flag")

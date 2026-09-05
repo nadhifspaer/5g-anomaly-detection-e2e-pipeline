@@ -1,9 +1,4 @@
-# Full local stack, architecture.md Section 4 Mode 2. Run `docker-compose up`
-# from this directory (or `docker-compose -f docker/docker-compose.yml up`
-# from the repo root). Prerequisite: an MLflow run must already exist under
-# mlruns/ (src/model.py's train_isolation_forest, e.g. via notebooks/02),
-# since api's lifespan loads the latest run at startup and mlruns/ is
-# bind-mounted read-only, never baked into the api image.
+# Full local stack. Requires an MLflow run already logged under mlruns/ before api can start (see src/model.py).
 
 services:
   kafka:

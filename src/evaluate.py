@@ -1,6 +1,4 @@
-# Path A evaluation, capacity-and-severity K selection. See architecture.md
-# Section 7/8: Path A resolved at Stage 0.2, not re-litigated; no Path B code
-# path here. sla_compliant is read here only as a label, never as a feature.
+# Evaluation metrics and capacity-and-severity K selection for the Isolation Forest model.
 
 from typing import Dict, Tuple
 
@@ -12,7 +10,7 @@ from sklearn.metrics import average_precision_score, roc_curve
 from src import feature_engineering as fe
 from src import model as m
 
-# swept alert-review capacity, percent of each day's scored volume (architecture.md Section 7)
+# swept alert-review capacity, percent of each day's scored volume
 K_PCT_CANDIDATES = [0.005, 0.01, 0.02, 0.05, 0.10, 0.15]
 
 # below this sla_compliant==0 rate, Precision@K/PR-AUC estimates are judged too noisy for Path A
@@ -20,13 +18,10 @@ MIN_LABEL_RATE = 0.01
 # accuracy edge over base rate above which a single KPI column is judged a label restatement
 TRIVIAL_SINGLE_COLUMN_EDGE_PP = 5.0
 
-# confirmed ~60 rows/hour x 24h, uniform across the file (architecture.md Section 2 / notebooks/01_eda.ipynb)
+# ~60 rows/hour x 24h, uniform across the file (see notebooks/01_eda.ipynb)
 DAILY_ROW_VOLUME = 1_440
 
-# review-capacity assumption (architecture.md Section 7), not a dollar figure:
-# 10 min/alert, 2h/shift dedicated to this system's alerts, 3 shifts covering 24h
-# -> (2*60)/10 = 12 alerts/analyst-shift, x3 shifts = 36 alerts/day capacity
-# -> 36 / 1440 daily rows = 0.025 (2.5%), the capacity cap expressed as K
+# review-capacity assumption, not a dollar figure; see reports/model_evaluation.md, Capacity-and-Severity K Selection
 ANALYST_MINUTES_PER_ALERT = 10
 SHIFT_HOURS_FOR_ALERTS = 2
 SHIFTS_PER_DAY = 3
@@ -35,8 +30,7 @@ CAPACITY_K_PCT = DAILY_ALERT_CAPACITY / DAILY_ROW_VOLUME
 
 
 def _best_single_column_accuracy(values: np.ndarray, is_positive: np.ndarray) -> float:
-    # audit-only: best-possible single-threshold accuracy, both directions, O(n log n).
-    # Not a model evaluation metric, see select_evaluation_path.
+    # audit-only best-possible single-threshold accuracy, both directions; not a model evaluation metric
     order = np.argsort(values)
     sorted_labels = is_positive[order]
     n = len(sorted_labels)
@@ -55,26 +49,7 @@ def select_evaluation_path(
     kpi_cols=fe.KPI_COLS,
     label_col: str = "sla_compliant",
 ) -> dict:
-    """Confirms Evaluation Path A (architecture.md Section 7/8, resolved at
-    Stage 0.2, not re-litigated), reproducing the Stage 0.1 label audit
-    (architecture.md Section 2) on train-side data for transparency in
-    reports/model_evaluation.md. This project implements Path A only; there
-    is no Path B code path to dispatch to.
-
-    meta_train is Stage 2's actual train split (src/feature_engineering.py's
-    temporal_train_test_split output): rate0 is computed by calling
-    src/model.py's derive_contamination_path_a(meta_train) directly, the same
-    call Stage 3.1 uses for `contamination`, so both report one shared number.
-    df_full_raw supplies the raw KPI columns for the single-column check
-    (meta_train carries no raw KPI values), row-matched to meta_train's exact
-    (timestamp, cell_id, slice_type) keys, not an independent timestamp cutoff,
-    so it does not silently reintroduce the min_periods rows Stage 2 dropped.
-
-    Returns rate0, base_rate, max_single_column_edge_pp, single_column_edges_pp,
-    degenerate_rate, trivial_single_column (the last two per the thresholds
-    documented in MIN_LABEL_RATE / TRIVIAL_SINGLE_COLUMN_EDGE_PP), reported
-    for transparency only; they do not change which evaluation runs.
-    """
+    """Reproduces the sla_compliant label audit on train-side data; see reports/model_evaluation.md, Evaluation Label."""
     rate0 = m.derive_contamination_path_a(meta_train)
     base_rate = max(rate0, 1 - rate0)
 
@@ -99,7 +74,7 @@ def select_evaluation_path(
 
 
 def anomaly_score(model: IsolationForest, X: pd.DataFrame) -> np.ndarray:
-    # higher = more anomalous; decision_function is higher = more normal
+    # higher = more anomalous. decision_function is higher = more normal
     return -model.decision_function(X)
 
 
@@ -133,12 +108,7 @@ def evaluate_path_a(
     k_pcts=K_PCT_CANDIDATES,
     target_recall: float = 0.9,
 ) -> dict:
-    """Path A metrics (architecture.md Section 7): PR-AUC, Precision@K/Recall@K
-    swept over k_pcts (percent of each day's scored volume, never a fixed
-    absolute K), False Positive Rate at target_recall (0.9 default, an
-    adjustable operational choice, not derived from the data). sla_compliant
-    is read from meta_test only, never passed to the model.
-    """
+    """PR-AUC, Precision@K/Recall@K swept over k_pcts, and FPR at target_recall against sla_compliant."""
     y_true = (meta_test["sla_compliant"] == 0).astype(int).to_numpy()
     scores = anomaly_score(model, X_test)
     dates = meta_test["timestamp"].dt.date.to_numpy()
@@ -171,24 +141,7 @@ def capacity_and_severity_table(
     meta_test: pd.DataFrame,
     k_pcts=K_PCT_CANDIDATES,
 ) -> pd.DataFrame:
-    """Capacity-and-severity K-selection table (architecture.md Section 7),
-    replacing the dollar-cost alert-budget metric: this dataset carries no
-    financial data to ground a cost figure, and the dollar-cost curve never
-    converged to an interior minimum (always favored higher K).
-
-    Per swept K: alerts/day (n_alerts scaled from the test window's actual
-    row count to DAILY_ROW_VOLUME, since the test split covers a partial
-    day, not a full one), precision, recall, and the severity of missed
-    anomalies, mean and max of the mean absolute z-score across
-    src/feature_engineering.py's ZSCORE_COLS for every sla_compliant == 0
-    row NOT alerted at that K. Severity uses the KPI z-score columns only,
-    not hour_of_day/day_of_week (calendar context, not a deviation measure),
-    even though both are in the feature set the model was trained on.
-
-    within_capacity flags K values at or under CAPACITY_K_PCT, the stated
-    review-capacity assumption (see DAILY_ALERT_CAPACITY above), not a
-    dollar figure.
-    """
+    """Alerts/day, precision/recall, and missed-anomaly severity per swept K; see reports/model_evaluation.md, Capacity-and-Severity K Selection."""
     y_true = (meta_test["sla_compliant"] == 0).astype(int).to_numpy()
     scores = anomaly_score(model, X_test)
     dates = meta_test["timestamp"].dt.date.to_numpy()
@@ -216,19 +169,14 @@ def capacity_and_severity_table(
 
 
 def select_production_k(table: pd.DataFrame) -> dict:
-    """Production K (architecture.md Section 7): among swept candidates at or
-    under CAPACITY_K_PCT (the stated review-capacity assumption, not a
-    dollar-cost minimum), the one with the highest recall. Recall is
-    non-decreasing in K under top-K alerting, so this is equivalently the
-    largest tested K that still fits the capacity cap.
-    """
+    """Picks the highest-recall swept K at or under CAPACITY_K_PCT."""
     under_cap = table[table["within_capacity"]]
     if under_cap.empty:
         raise ValueError("no swept K stays within CAPACITY_K_PCT; widen K_PCT_CANDIDATES downward")
     return under_cap.loc[under_cap["recall"].idxmax()].to_dict()
 
 
-# ---------------- runtime entry point ----------------
+# runtime entry point
 
 
 def run_evaluation(
@@ -240,12 +188,7 @@ def run_evaluation(
     k_pcts=K_PCT_CANDIDATES,
     target_recall: float = 0.9,
 ) -> dict:
-    """Runs Path A evaluation (architecture.md Section 7/8, the only
-    evaluation path this project implements). select_evaluation_path's
-    diagnostics are attached for transparency, reproducing the Stage 0.1
-    label audit on train-side data at runtime; they report on the
-    resolved decision, they do not select or change which evaluation runs.
-    """
+    """Runs evaluation and attaches label-selection diagnostics for reporting."""
     diagnostics = select_evaluation_path(meta_train, df_full_raw)
 
     contamination = next(iter(models_by_contamination))

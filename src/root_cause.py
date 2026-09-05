@@ -1,5 +1,4 @@
-# Per-feature deviation-contribution ranking against a row's own (cell_id,
-# slice_type) rolling baseline. See architecture.md Section 3, Section 5 Step 5.
+# Per-feature deviation-contribution ranking against a row's own (cell_id, slice_type) rolling baseline.
 
 import pandas as pd
 

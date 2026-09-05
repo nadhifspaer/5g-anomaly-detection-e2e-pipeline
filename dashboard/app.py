@@ -1,10 +1,4 @@
-# Streamlit dashboard, APP_MODE=cloud (default) or local. See architecture.md
-# Section 4, Section 5 Step 6, Section 9. Single codebase, two modes.
-#
-# cloud: model + src/score_pipeline.py embedded in-process, sample-picker
-# over held-out Stage 2 test data. No Kafka, no FastAPI.
-# local: polls streaming/scored_results.db (Stage 5.2 consumer output),
-# live-updating alert table + summary panel.
+# Streamlit dashboard, APP_MODE=cloud (embedded model, sample picker over held-out test data).
 
 import json
 import os
@@ -14,13 +8,7 @@ import time
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
-# `streamlit run` (unlike `python -m streamlit run`) does not add the current
-# working directory to sys.path, only this script's own dashboard/ directory,
-# so a bare `streamlit run dashboard/app.py` from the project root cannot
-# find the sibling src/ package without this. Confirmed via diagnostic:
-# bare `streamlit run` sys.path has no project-root entry at all; `python -m
-# streamlit run` does (Python's -m semantics insert cwd). Insert unconditionally
-# so this holds regardless of invocation style, cwd, or OS path separators.
+# `streamlit run` doesn't add the project root to sys.path, only this script's own directory, so the sibling src/ package needs this
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
@@ -33,15 +21,12 @@ from src import model as m
 from src import score_pipeline as sp
 
 DATA_PATH = ROOT_DIR / "data" / "5g_kpi_dataset.csv"
-# SCORED_DB_PATH override: docker-compose's consumer writes to a shared named
-# volume, not the bind-mounted streaming/ directory (docker/docker-compose.yml)
+# SCORED_DB_PATH override: docker-compose's consumer writes to a shared named volume, not the bind-mounted streaming/ directory
 DB_PATH = Path(os.environ.get("SCORED_DB_PATH", ROOT_DIR / "streaming" / "scored_results.db"))
 LOCAL_POLL_SECONDS_DEFAULT = 5
 LOCAL_ROW_LIMIT = 200
 TOP_CELLS_SHOWN = 5
-# 300 rows at 1/sec fits a ~5 minute viewing session while still spanning the
-# entire test window; evenly-spaced striding (not the first 300 rows) avoids
-# biasing the replay toward only the earliest part of that window
+# evenly-spaced striding across the full test window, not just the first 300 rows
 LIVE_REPLAY_ROWS = 300
 LIVE_REPLAY_INTERVAL_SECONDS = 1
 
@@ -87,13 +72,10 @@ def _highlight_alerts(row: pd.Series) -> list:
     return [color] * len(row)
 
 
-# ---------------- cloud mode ----------------
-
 
 @st.cache_data
-def load_stage2_split():
-    # Stage 2 temporal split; meta_test rows already passed build_feature_matrix's
-    # dropna, so every one has sufficient (cell_id, slice_type) backward history
+def load_temporal_split():
+    # meta_test rows already passed build_feature_matrix's dropna, so every one has sufficient backward history
     df = fe.load_raw(str(DATA_PATH))
     X, meta = fe.build_feature_matrix(df.copy())
     X_train, _, meta_train, meta_test = fe.temporal_train_test_split(X, meta)
@@ -102,16 +84,8 @@ def load_stage2_split():
 
 @st.cache_resource
 def load_model_cloud():
-    """Trains fresh in-process via src/model.py's train_isolation_forest, never
-    mlflow.sklearn.load_model(runs:/...): a run's artifact_uri is an absolute
-    path baked in at training time, tied to the filesystem that trained it.
-    That already broke twice moving this project between a Windows host and a
-    Linux container (in both directions); Streamlit Community Cloud's own
-    server filesystem is a fourth, unrelated absolute-path environment this
-    can never assume. Cached so training runs once per app session, not once
-    per interaction. Local mode and api/main.py still load via MLflow, correctly,
-    since docker-compose controls that path to stay consistent end to end."""
-    _, X_train, meta_train, _ = load_stage2_split()
+    """Trains fresh in-process, never loads a saved model artifact, for filesystem portability across environments."""
+    _, X_train, meta_train, _ = load_temporal_split()
     result = m.train_isolation_forest(X_train, meta_train)
     contamination = next(iter(result["runs"]))
     return result["runs"][contamination]["model"]
@@ -128,8 +102,7 @@ def _lookup_raw_row(df: pd.DataFrame, cell_id: str, slice_type: str, timestamp) 
 
 def _score_test_row(df: pd.DataFrame, model, cell_id: str, slice_type: str, timestamp) -> dict:
     raw_row = _lookup_raw_row(df, cell_id, slice_type, timestamp)
-    # backward-only: same-group rows strictly before the picked timestamp, per
-    # src/feature_engineering.py's rolling window (no forward leakage)
+    # backward-only: same-group rows strictly before the picked timestamp, no forward leakage
     history = df[
         (df["cell_id"] == cell_id) & (df["slice_type"] == slice_type) & (df["timestamp"] < timestamp)
     ]
@@ -137,11 +110,7 @@ def _score_test_row(df: pd.DataFrame, model, cell_id: str, slice_type: str, time
 
 
 def _verify_picker_coverage(meta_test: pd.DataFrame) -> dict:
-    """Sums row counts across every (cell_id, slice_type) combination present
-    in meta_test and confirms the total equals len(meta_test): every row is
-    reachable through some cell/slice/timestamp selectbox combination in
-    render_sample_picker, none pooled away or hidden by a dropdown that can't
-    reach it."""
+    """Confirms every meta_test row is reachable through some cell/slice/timestamp picker combination."""
     combos = meta_test[["cell_id", "slice_type"]].drop_duplicates()
     total = sum(
         int(((meta_test["cell_id"] == c) & (meta_test["slice_type"] == s)).sum())
@@ -152,7 +121,7 @@ def _verify_picker_coverage(meta_test: pd.DataFrame) -> dict:
 
 def render_sample_picker() -> None:
     model = load_model_cloud()
-    df, _, _, meta_test = load_stage2_split()
+    df, _, _, meta_test = load_temporal_split()
 
     st.sidebar.header("Sample picker (held-out test data)")
 
@@ -163,7 +132,7 @@ def render_sample_picker() -> None:
         f"({'OK' if coverage['matches'] else 'MISMATCH, see console'})."
     )
     if not coverage["matches"]:
-        st.sidebar.error("Sample picker coverage mismatch: not every meta_test row is reachable. See CLAUDE.md checklist.")
+        st.sidebar.error("Sample picker coverage mismatch: not every meta_test row is reachable.")
 
     cell_id = st.sidebar.selectbox("Cell", sorted(meta_test["cell_id"].unique()))
     slice_options = sorted(meta_test.loc[meta_test["cell_id"] == cell_id, "slice_type"].unique())
@@ -187,12 +156,9 @@ def render_sample_picker() -> None:
 
 @st.cache_resource
 def build_live_replay_rows():
-    """Scores LIVE_REPLAY_ROWS samples evenly strided across meta_test's full
-    timestamp-sorted range (architecture.md-style global order, matching
-    streaming/producer.py's own sort_values("timestamp") convention), not the
-    first LIVE_REPLAY_ROWS rows in sequence. Computed once per process."""
+    """Scores LIVE_REPLAY_ROWS samples evenly strided across the full test timestamp range, computed once per process."""
     model = load_model_cloud()
-    df, _, _, meta_test = load_stage2_split()
+    df, _, _, meta_test = load_temporal_split()
     sorted_meta = meta_test.sort_values("timestamp").reset_index(drop=True)
 
     n = len(sorted_meta)
@@ -217,8 +183,7 @@ def render_live_replay() -> None:
         st.session_state.live_replay_playing = False
     if "live_replay_autopause" not in st.session_state:
         st.session_state.live_replay_autopause = True
-    # revealed count we last auto-paused at, so a resumed Play doesn't
-    # immediately re-trigger the pause on the same still-current alert row
+    # revealed count we last auto-paused at, so a resumed Play doesn't immediately re-trigger on the same row
     if "live_replay_autopaused_at" not in st.session_state:
         st.session_state.live_replay_autopaused_at = None
 
@@ -226,11 +191,7 @@ def render_live_replay() -> None:
     finished = revealed >= total
     current = results[revealed - 1] if (not finished and revealed > 0) else None
 
-    # auto-pause detection runs before the sidebar controls render below, so
-    # the Play/Pause button label reflects the post-auto-pause state on the
-    # same rerun it happens, not one rerun late. Only triggers on a freshly
-    # revealed row during active playback, never re-triggers on the same row
-    # when Play is pressed again to resume past it.
+    # auto-pause detection runs before the sidebar controls render, so Play/Pause reflects it on the same rerun
     if (
         current is not None
         and st.session_state.live_replay_autopause
@@ -319,7 +280,6 @@ def render_cloud_mode() -> None:
         render_live_replay()
 
 
-# ---------------- local mode ----------------
 
 
 def _read_scored_results(limit: int = LOCAL_ROW_LIMIT) -> pd.DataFrame:

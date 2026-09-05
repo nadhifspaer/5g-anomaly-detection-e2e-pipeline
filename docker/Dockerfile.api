@@ -1,6 +1,4 @@
-# FastAPI service image. Also reused (command override) for streaming/producer.py
-# and streaming/consumer.py in docker-compose.yml, see architecture.md Section 4
-# Mode 2, Section 6. Build context is the repo root.
+# FastAPI service image, also reused (command override) for streaming/producer.py and streaming/consumer.py. Build context is the repo root.
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -14,9 +12,7 @@ COPY api/ api/
 COPY streaming/ streaming/
 COPY data/ data/
 
-# mlruns/ is bind-mounted read-only at runtime (docker-compose), never baked
-# into the image, so the container always loads whatever MLflow run is
-# latest on the host; train one first via notebooks/02 if empty
+# mlruns/ is bind-mounted read-only at runtime, never baked into the image; train a run first via notebooks/02 if empty
 RUN mkdir -p mlruns
 
 EXPOSE 8000

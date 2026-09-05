@@ -1,5 +1,4 @@
-# Streamlit dashboard image, APP_MODE=cloud or local (docker-compose sets
-# local). See architecture.md Section 4, Section 9. Build context is the repo root.
+# Streamlit dashboard image, APP_MODE=cloud or local (docker-compose sets local). Build context is the repo root.
 FROM python:3.11-slim
 
 WORKDIR /app

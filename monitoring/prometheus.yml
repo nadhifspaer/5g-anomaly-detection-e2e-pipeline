@@ -1,6 +1,4 @@
-# Scrapes api/main.py's /metrics endpoint (Stage 5.1: api_requests_total,
-# api_request_latency_seconds, api_request_errors_total). Local-only, per
-# architecture.md Section 4.
+# Scrapes api/main.py's /metrics endpoint (api_requests_total, api_request_latency_seconds, api_request_errors_total). Local-only.
 
 global:
   scrape_interval: 15s

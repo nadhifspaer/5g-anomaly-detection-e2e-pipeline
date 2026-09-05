@@ -1,5 +1,4 @@
 # Backward-window (cell_id, slice_type) rolling z-score features, temporal split.
-# See architecture.md Section 3, Section 5 Steps 1-2.
 
 from typing import Tuple
 
@@ -17,7 +16,7 @@ KPI_COLS = [
 ]
 GROUP_KEYS = ["cell_id", "slice_type"]
 
-# window=10, min_periods=3, sized against HC's 18-row floor (Stage 0.1/0.2 audit)
+# window=10, min_periods=3 
 ROLL_WINDOW = 10
 ROLL_MIN_PERIODS = 3
 
@@ -28,7 +27,6 @@ META_COLS = ["timestamp", "cell_id", "slice_type", "cell_type", "sla_compliant"]
 
 
 def load_raw(path: str) -> pd.DataFrame:
-    # raw file only, never the second pre-engineered Kaggle file
     df = pd.read_csv(path)
     df["timestamp"] = pd.to_datetime(df["timestamp"], errors="raise")
     return df
@@ -46,7 +44,7 @@ def _backward_rolling_mean_std(df: pd.DataFrame, col: str) -> Tuple[pd.Series, p
 
 
 def add_rolling_zscore_features(df: pd.DataFrame) -> pd.DataFrame:
-    # backward-window (cell_id, slice_type) z-score, window=10, min_periods=3, sized against HC's 18-row floor (Stage 0.1/0.2 audit)
+    # backward-window (cell_id, slice_type) z-score
     df = df.sort_values(GROUP_KEYS + ["timestamp"]).reset_index(drop=True)
     for col in KPI_COLS:
         mean, std = _backward_rolling_mean_std(df, col)
@@ -71,7 +69,7 @@ def build_feature_matrix(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
     # drop rows with insufficient backward history (< min_periods)
     df = df.dropna(subset=ZSCORE_COLS).reset_index(drop=True)
     X = df[FEATURE_COLS].copy()
-    # sla_compliant held out for evaluation only, see architecture.md Section 3
+    # sla_compliant held out for evaluation only, never a feature
     meta = df[META_COLS].copy()
     return X, meta
 

@@ -1,5 +1,4 @@
-# FastAPI service wrapping src/score_pipeline.py's single scoring function.
-# See architecture.md Section 5 Step 4, Section 9: /score, /health, /metrics.
+# FastAPI service wrapping src/score_pipeline.py's single scoring function: /score, /health, /metrics.
 
 import time
 from contextlib import asynccontextmanager
@@ -20,16 +19,7 @@ from src import score_pipeline as sp
 
 DATA_PATH = "data/5g_kpi_dataset.csv"
 
-# module-level state: model + in-memory history buffer, populated at startup and
-# appended to per request. The history buffer stands in for the Kafka-fed store
-# that APP_MODE=local reads from in the real design (architecture.md Section 4);
-# streaming/producer.py replays Stage 2's test split into Kafka and
-# streaming/consumer.py calls this API per row, this buffer is what makes each
-# call's backward window correct without a real store behind it yet. The model is
-# loaded from the latest logged src/model.py Stage 3.1 MLflow run below, per
-# architecture.md Section 5 Step 4's "model load" wording; a real deployment would
-# load a specific promoted run from a registry rather than always "the latest run
-# in the store", that promotion step does not exist yet.
+# module-level state: loaded model + in-memory history buffer, populated at startup and appended to per request
 _state: dict = {}
 
 
@@ -51,13 +41,7 @@ def _load_latest_model():
 
 
 def _load_train_history() -> pd.DataFrame:
-    # train-side raw rows only, matching Stage 2's own split, never the full
-    # dataset: test-side rows arrive later through /score's append (below) and
-    # are not known to the system at startup. Pre-loading them here would make
-    # every streamed test row duplicate itself in `history` on its own first
-    # score, corrupting the window=10 rolling computation for that group's
-    # later rows (confirmed live: a known test-split anomaly's dominant KPI
-    # z-score came back 16.46 pre-fix vs. the correct batch value of 9.68).
+    # train-side raw rows only; preloading test rows here would duplicate them into history on their first /score call
     df = fe.load_raw(DATA_PATH)
     X, meta = fe.build_feature_matrix(df.copy())
     _, _, meta_train, _ = fe.temporal_train_test_split(X, meta)
@@ -126,8 +110,7 @@ def score(row: KPIRow):
     raw_row = row.model_dump()
     ts = pd.to_datetime(raw_row["timestamp"])
     history = _state["history"]
-    # pre-filter to this row's own (cell_id, slice_type) group, strictly-before rows only;
-    # score_row does its own identity match, this filter is a caller-side efficiency choice
+    # pre-filter to this row's own (cell_id, slice_type) group, strictly-before rows only
     group_history = history[
         (history["cell_id"] == raw_row["cell_id"])
         & (history["slice_type"] == raw_row["slice_type"])

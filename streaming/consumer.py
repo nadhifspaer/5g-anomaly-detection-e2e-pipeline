@@ -1,5 +1,4 @@
-# Kafka consumer: scores each streamed KPI row via /score, writes results to
-# SQLite. See architecture.md Section 5 Step 6, Section 6 (Kafka).
+# Kafka consumer: scores each streamed KPI row via /score, writes results to SQLite.
 
 import argparse
 import json
@@ -11,8 +10,7 @@ from kafka import KafkaConsumer
 TOPIC = "kpi-stream"
 DB_PATH = "streaming/scored_results.db"
 API_URL = "http://127.0.0.1:8000/score"
-# fixed group_id: restarts resume from the last committed offset instead of
-# re-reading the topic from earliest and re-scoring/duplicating every row
+# fixed group_id: restarts resume from the last committed offset instead of re-reading from earliest
 GROUP_ID = "kpi-scoring-consumer"
 
 

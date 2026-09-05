@@ -1,5 +1,4 @@
-# Kafka producer: replays Stage 2's held-out test split as a simulated live KPI
-# feed. See architecture.md Section 5 Step 6, Section 6 (Kafka).
+# Kafka producer: replays the held-out test split as a simulated live KPI feed.
 
 import argparse
 import json
@@ -7,10 +6,7 @@ import sys
 import time
 from pathlib import Path
 
-# `python streaming/producer.py` sets sys.path[0] to this script's own
-# directory (streaming/), never the cwd, so the sibling src/ package isn't
-# importable without this, confirmed by direct reproduction (docker/Dockerfile.api
-# only avoids it via its own ENV PYTHONPATH=/app, not by accident)
+# `python streaming/producer.py` sets sys.path[0] to this script's own directory, not the cwd, so the sibling src/ package needs this
 _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
@@ -25,7 +21,7 @@ PAYLOAD_COLS = ["timestamp", "cell_id", "cell_type", "slice_type"] + fe.KPI_COLS
 
 
 def load_test_rows():
-    # Stage 2's own split, never a redefinition: same functions Stage 2 uses
+    # reuses the same feature-engineering split functions as training, never a redefinition
     df = fe.load_raw(DATA_PATH)
     X, meta = fe.build_feature_matrix(df.copy())
     _, _, _, meta_test = fe.temporal_train_test_split(X, meta)
@@ -33,13 +29,12 @@ def load_test_rows():
     test_raw = meta_test[["timestamp", "cell_id", "slice_type"]].merge(
         df, on=["timestamp", "cell_id", "slice_type"], how="left"
     )
-    # global timestamp order: also preserves per-(cell_id, slice_type) order as a
-    # consequence, since a group's own rows are non-decreasing within that order too
+    # global timestamp order also preserves per-(cell_id, slice_type) order as a consequence
     return test_raw.sort_values("timestamp").reset_index(drop=True)
 
 
 def run(rate_per_sec: float, bootstrap_servers: str, topic: str) -> None:
-    """Publish Stage 2's held-out test rows to `topic` at `rate_per_sec` rows/sec, in global timestamp order (preserves per-(cell_id, slice_type) order)."""
+    """Publish the held-out test split to `topic` at `rate_per_sec` rows/sec, in global timestamp order."""
     rows = load_test_rows()
     producer = KafkaProducer(
         bootstrap_servers=bootstrap_servers,
@@ -51,8 +46,7 @@ def run(rate_per_sec: float, bootstrap_servers: str, topic: str) -> None:
     for _, row in rows.iterrows():
         payload = {col: row[col] for col in PAYLOAD_COLS}
         payload["timestamp"] = str(payload["timestamp"])
-        # partition key = (cell_id, slice_type): Kafka's per-partition ordering
-        # guarantee then holds for each group even across multiple partitions
+        # partition key = (cell_id, slice_type): Kafka's per-partition ordering guarantee then holds per group
         key = f"{payload['cell_id']}|{payload['slice_type']}"
         producer.send(topic, key=key, value=payload)
         if delay:
@@ -64,7 +58,7 @@ def run(rate_per_sec: float, bootstrap_servers: str, topic: str) -> None:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Replay Stage 2's test split to Kafka.")
+    parser = argparse.ArgumentParser(description="Replay the held-out test split to Kafka.")
     parser.add_argument("--rate", type=float, default=10.0, help="rows/sec to publish")
     parser.add_argument("--bootstrap-servers", default="localhost:9092")
     parser.add_argument("--topic", default=TOPIC)
